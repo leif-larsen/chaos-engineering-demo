@@ -127,12 +127,17 @@ jobs:
             deployChaos = ($env:DEPLOYMENT_CHAOS -eq 'true')
             sqlServerAdmin = $sqlAdminData
           }
-          $res = New-AzDeployment -Name $env:DEPLOYMENT_NAME -TemplateFile "src/infra/bicep/main.bicep" -Location $env:DEPLOYMENT_REGION -TemplateParameterObject $parameters
           
+          $res = New-AzDeployment -Name $env:DEPLOYMENT_NAME -TemplateFile "src/infra/bicep/main.bicep" -Location $env:DEPLOYMENT_REGION -TemplateParameterObject $parameters
+
+          if ($res.Outputs -eq $null) {
+            Write-Error "Deployment did not produce any outputs. Please check the deployment logs for errors."
+            exit 1
+          }
+
           # Save the outputs from the deployment
           # These contain the resource names we need for deploying
-          $outputsJson = $res.Outputs | ConvertTo-Json -Depth 10
-          $outputsJson | Out-File output.deployment.json
+          $res.Outputs | ConvertTo-Json -Depth 10 | Out-File output.deployment.json
 
           # Write the Front Door endpoint hostname to the step summary:
           $endpointHostname = $res.Outputs.frontdoor_Endpoint.Value
@@ -145,6 +150,11 @@ jobs:
       with: 
         azPSVersion: "latest"
         inlineScript: | 
+          if (-not (Test-Path "output.deployment.json") -or (Get-Content "output.deployment.json" | Measure-Object -Line).Lines -eq 0) {
+              Write-Error "Deployment output file is missing or empty. Please verify the deployment step."
+              exit 1
+          }
+          
           $deploymentOutput = Get-Content "output.deployment.json" | ConvertFrom-Json -Depth 10  
           $deploymentOutput.psobject.properties | ForEach-Object {
             ("{0}={1}" -f ($_.Name).ToUpper(), $_.Value.Value) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
